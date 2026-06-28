@@ -11,7 +11,7 @@ def _():
     from pathlib import Path
     from torch.utils.data import DataLoader, TensorDataset
     from datasets import Dataset
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from peft import LoraConfig, get_peft_model, TaskType
     from huggingface_hub import snapshot_download
 
@@ -20,10 +20,22 @@ def _():
 Trains a LoRA adapter on the 500-query safety classification dataset.
 Target: ≥12/13 adversarial (currently 8/13 with prompted 8B classifier).
 
-**Hardware:** RTX Pro 6000 (96 GB VRAM) — estimated 2-3 hours.
-Data auto-downloaded from GitHub. Raw PyTorch training loop — no Trainer/accelerate dependency.
+**Hardware:** RTX Pro 6000 (102 GB VRAM) — estimated 2-3 hours.
+Data auto-downloaded from GitHub. 4-bit loading to avoid OOM.
 """)
+    return (
+        AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig,
+        DataLoader, Dataset, LoraConfig, Path, TaskType, TensorDataset,
+        get_peft_model, json, mo, snapshot_download, torch, urllib,
+    )
 
+
+@app.cell(hide_code=True)
+def _(
+    AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig,
+    DataLoader, Dataset, LoraConfig, Path, TaskType, TensorDataset,
+    get_peft_model, json, mo, snapshot_download, torch, urllib,
+):
     # Download model
     _model_dir = Path("/marimo/Ternary-Bonsai-8B-FP16")
     if not _model_dir.exists():
@@ -52,12 +64,10 @@ Data auto-downloaded from GitHub. Raw PyTorch training loop — no Trainer/accel
     _train_dataset = Dataset.from_dict({"text": _texts}).train_test_split(test_size=0.2, seed=42)
     mo.md(f"Formatted: {len(_train_dataset['train'])} train, {len(_train_dataset['test'])} eval")
 
-    # Load tokenizer + model
+    # Load tokenizer + model in 4-bit
     _tokenizer = AutoTokenizer.from_pretrained(str(_model_dir), trust_remote_code=True)
     _tokenizer.pad_token = _tokenizer.eos_token
 
-    # Load in 4-bit to avoid OOM (FP16 fills ~94 GB of 102 GB VRAM)
-    from transformers import BitsAndBytesConfig
     _bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.float16,
@@ -68,11 +78,12 @@ Data auto-downloaded from GitHub. Raw PyTorch training loop — no Trainer/accel
         quantization_config=_bnb_config,
         trust_remote_code=True,
     )
+
     # LoRA
     _model = get_peft_model(_model, LoraConfig(task_type=TaskType.CAUSAL_LM, r=16, lora_alpha=32, lora_dropout=0.05, target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]))
     _model.print_trainable_parameters()
 
-    # Tokenize (shorter sequences to save memory)
+    # Tokenize
     def _tok(examples):
         r = _tokenizer(examples["text"], max_length=128, truncation=True, padding="max_length")
         r["labels"] = r["input_ids"].copy()
@@ -81,13 +92,12 @@ Data auto-downloaded from GitHub. Raw PyTorch training loop — no Trainer/accel
     _tokenized_train = _train_dataset["train"].map(_tok, batched=True, remove_columns=["text"])
     _tokenized_eval = _train_dataset["test"].map(_tok, batched=True, remove_columns=["text"])
 
-    # Convert to tensors
     _train_input_ids = torch.tensor([x["input_ids"] for x in _tokenized_train])
     _train_labels = torch.tensor([x["labels"] for x in _tokenized_train])
     _eval_input_ids = torch.tensor([x["input_ids"] for x in _tokenized_eval])
     _eval_labels = torch.tensor([x["labels"] for x in _tokenized_eval])
 
-    # Raw PyTorch training loop — minimal memory footprint
+    # Training loop
     _train_loader = DataLoader(TensorDataset(_train_input_ids, _train_labels), batch_size=1, shuffle=True)
     _eval_loader = DataLoader(TensorDataset(_eval_input_ids, _eval_labels), batch_size=1)
 
@@ -115,23 +125,20 @@ Data auto-downloaded from GitHub. Raw PyTorch training loop — no Trainer/accel
             if _i % 10 == 0:
                 print(f"  step {_i}: loss={_loss.item() * _accum_steps:.4f}")
 
-        # Eval
         _model.eval()
         _eval_loss = 0.0
         with torch.no_grad():
             for _batch_ids, _batch_labels in _eval_loader:
                 _batch_ids = _batch_ids.to("cuda")
                 _batch_labels = _batch_labels.to("cuda")
-                with torch.amp.autocast("cuda"):
-                    _out = _model(input_ids=_batch_ids, labels=_batch_labels)
-                    _eval_loss += _out.loss.item()
+                _out = _model(input_ids=_batch_ids, labels=_batch_labels)
+                _eval_loss += _out.loss.item()
 
         _avg_train = _train_loss / len(_train_loader)
         _avg_eval = _eval_loss / len(_eval_loader)
         print(f"Epoch {_epoch+1}/3 | train_loss={_avg_train:.4f} | eval_loss={_avg_eval:.4f}")
         mo.md(f"Epoch {_epoch+1}/3 | train_loss={_avg_train:.4f} | eval_loss={_avg_eval:.4f}")
 
-    # Save
     _output_dir = "/marimo/safety-lora-8b"
     _model.save_pretrained(_output_dir)
     _tokenizer.save_pretrained(_output_dir)
