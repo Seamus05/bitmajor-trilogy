@@ -11,7 +11,7 @@ def _():
     from pathlib import Path
     from torch.utils.data import DataLoader, TensorDataset
     from datasets import Dataset
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     from peft import LoraConfig, get_peft_model, TaskType
     from huggingface_hub import snapshot_download
 
@@ -24,7 +24,7 @@ Target: ≥12/13 adversarial (currently 8/13 with prompted 8B classifier).
 Data auto-downloaded from GitHub. 4-bit loading to avoid OOM.
 """)
     return (
-        AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig,
+        AutoModelForCausalLM, AutoTokenizer,
         DataLoader, Dataset, LoraConfig, Path, TaskType, TensorDataset,
         get_peft_model, json, mo, snapshot_download, torch, urllib,
     )
@@ -32,7 +32,7 @@ Data auto-downloaded from GitHub. 4-bit loading to avoid OOM.
 
 @app.cell(hide_code=True)
 def _(
-    AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig,
+    AutoModelForCausalLM, AutoTokenizer,
     DataLoader, Dataset, LoraConfig, Path, TaskType, TensorDataset,
     get_peft_model, json, mo, snapshot_download, torch, urllib,
 ):
@@ -64,20 +64,15 @@ def _(
     _train_dataset = Dataset.from_dict({"text": _texts}).train_test_split(test_size=0.2, seed=42)
     mo.md(f"Formatted: {len(_train_dataset['train'])} train, {len(_train_dataset['test'])} eval")
 
-    # Load tokenizer + model in 4-bit
+    # Load tokenizer + model (FP16 — clean GPU, no other notebooks)
     _tokenizer = AutoTokenizer.from_pretrained(str(_model_dir), trust_remote_code=True)
     _tokenizer.pad_token = _tokenizer.eos_token
 
-    _bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_use_double_quant=True,
-    )
     _model = AutoModelForCausalLM.from_pretrained(
         str(_model_dir),
-        quantization_config=_bnb_config,
+        torch_dtype=torch.float16,
         trust_remote_code=True,
-    )
+    ).to("cuda")
 
     # LoRA
     _model = get_peft_model(_model, LoraConfig(task_type=TaskType.CAUSAL_LM, r=16, lora_alpha=32, lora_dropout=0.05, target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]))
