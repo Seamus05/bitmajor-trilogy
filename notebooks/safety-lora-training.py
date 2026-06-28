@@ -68,15 +68,13 @@ Data auto-downloaded from GitHub. Raw PyTorch training loop — no Trainer/accel
         quantization_config=_bnb_config,
         trust_remote_code=True,
     )
-    _model.gradient_checkpointing_enable()
-
     # LoRA
     _model = get_peft_model(_model, LoraConfig(task_type=TaskType.CAUSAL_LM, r=16, lora_alpha=32, lora_dropout=0.05, target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]))
     _model.print_trainable_parameters()
 
-    # Tokenize
+    # Tokenize (shorter sequences to save memory)
     def _tok(examples):
-        r = _tokenizer(examples["text"], max_length=256, truncation=True, padding="max_length")
+        r = _tokenizer(examples["text"], max_length=128, truncation=True, padding="max_length")
         r["labels"] = r["input_ids"].copy()
         return r
 
@@ -89,14 +87,13 @@ Data auto-downloaded from GitHub. Raw PyTorch training loop — no Trainer/accel
     _eval_input_ids = torch.tensor([x["input_ids"] for x in _tokenized_eval])
     _eval_labels = torch.tensor([x["labels"] for x in _tokenized_eval])
 
-    # Raw PyTorch training loop (no Trainer/accelerate dependency)
+    # Raw PyTorch training loop — minimal memory footprint
     _train_loader = DataLoader(TensorDataset(_train_input_ids, _train_labels), batch_size=1, shuffle=True)
     _eval_loader = DataLoader(TensorDataset(_eval_input_ids, _eval_labels), batch_size=1)
 
     _optimizer = torch.optim.AdamW(_model.parameters(), lr=2e-4, weight_decay=0.01)
     _scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(_optimizer, T_max=3 * len(_train_loader))
     _accum_steps = 32
-    _scaler = torch.amp.GradScaler("cuda")
 
     mo.md("Training (2-3 hours on RTX Pro 6000)...")
 
@@ -107,13 +104,11 @@ Data auto-downloaded from GitHub. Raw PyTorch training loop — no Trainer/accel
         for _i, (_batch_ids, _batch_labels) in enumerate(_train_loader):
             _batch_ids = _batch_ids.to("cuda")
             _batch_labels = _batch_labels.to("cuda")
-            with torch.amp.autocast("cuda"):
-                _out = _model(input_ids=_batch_ids, labels=_batch_labels)
-                _loss = _out.loss / _accum_steps
-            _scaler.scale(_loss).backward()
+            _out = _model(input_ids=_batch_ids, labels=_batch_labels)
+            _loss = _out.loss / _accum_steps
+            _loss.backward()
             if (_i + 1) % _accum_steps == 0:
-                _scaler.step(_optimizer)
-                _scaler.update()
+                _optimizer.step()
                 _optimizer.zero_grad()
                 _scheduler.step()
             _train_loss += _loss.item() * _accum_steps
