@@ -56,7 +56,18 @@ Data auto-downloaded from GitHub. Raw PyTorch training loop — no Trainer/accel
     _tokenizer = AutoTokenizer.from_pretrained(str(_model_dir), trust_remote_code=True)
     _tokenizer.pad_token = _tokenizer.eos_token
 
-    _model = AutoModelForCausalLM.from_pretrained(str(_model_dir), torch_dtype=torch.float16, trust_remote_code=True).to("cuda")
+    # Load in 4-bit to avoid OOM (FP16 fills ~94 GB of 102 GB VRAM)
+    from transformers import BitsAndBytesConfig
+    _bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_use_double_quant=True,
+    )
+    _model = AutoModelForCausalLM.from_pretrained(
+        str(_model_dir),
+        quantization_config=_bnb_config,
+        trust_remote_code=True,
+    )
     _model.gradient_checkpointing_enable()
 
     # LoRA
