@@ -85,9 +85,8 @@ Data auto-downloaded from GitHub. Fully self-contained.
     _model = AutoModelForCausalLM.from_pretrained(
         str(_model_dir),
         torch_dtype=torch.float16,
-        device_map="auto",
         trust_remote_code=True,
-    )
+    ).to("cuda")
     _model.gradient_checkpointing_enable()
 
     # Step 5: Configure LoRA
