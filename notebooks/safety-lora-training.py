@@ -96,7 +96,10 @@ def _(
     _train_loader = DataLoader(TensorDataset(_train_input_ids, _train_labels), batch_size=1, shuffle=True)
     _eval_loader = DataLoader(TensorDataset(_eval_input_ids, _eval_labels), batch_size=1)
 
-    _optimizer = torch.optim.AdamW(_model.parameters(), lr=2e-4, weight_decay=0.01)
+    _optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, _model.parameters()),
+        lr=2e-4, weight_decay=0.01,
+    )
     _scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(_optimizer, T_max=3 * len(_train_loader))
     _accum_steps = 32
 
