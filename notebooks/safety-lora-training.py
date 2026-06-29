@@ -140,7 +140,29 @@ def _(
     _output_dir = "/marimo/safety-lora-8b"
     _model.save_pretrained(_output_dir)
     _tokenizer.save_pretrained(_output_dir)
-    mo.md(f"Done! Adapter: {(Path(_output_dir)/'adapter_model.safetensors').stat().st_size/1024/1024:.1f} MB")
+    _size_mb = (Path(_output_dir)/'adapter_model.safetensors').stat().st_size/1024/1024
+    mo.md(f"Done! Adapter: {_size_mb:.1f} MB")
+
+    # Upload to HuggingFace
+    _hf_token = mo.ui.text(label="HF Token (write access)", kind="password")
+    _hf_repo = mo.ui.text(label="HF Repo", value="prism-ml/safety-lora-8b")
+    mo.md("## Upload to HuggingFace\n\nEnter your HF token and repo name, then click Upload.")
+    mo.hstack([_hf_token, _hf_repo])
+
+    _upload_btn = mo.ui.run_button(label="Upload to HuggingFace")
+    _upload_btn
+
+    if _upload_btn.value:
+        import os
+        os.environ["HF_TOKEN"] = _hf_token.value
+        from huggingface_hub import HfApi
+        _api = HfApi()
+        _api.upload_folder(
+            folder_path=_output_dir,
+            repo_id=_hf_repo.value,
+            repo_type="model",
+        )
+        mo.md(f"✅ Uploaded to HuggingFace: {_hf_repo.value}")
 
     return
 
