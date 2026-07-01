@@ -140,29 +140,27 @@ for _epoch in range(3):
     _avg_eval = _eval_loss / len(_eval_loader)
     log(f"Epoch {_epoch+1}/3 | train_loss={_avg_train:.4f} | eval_loss={_avg_eval:.4f}")
 
-# ── Save locally ──
-log("Saving adapter...")
-_model.save_pretrained(str(OUTPUT_DIR))
-_tokenizer.save_pretrained(str(OUTPUT_DIR))
-_size_mb = (OUTPUT_DIR / "adapter_model.safetensors").stat().st_size / 1024 / 1024
-log(f"Done! Adapter: {_size_mb:.1f} MB → {OUTPUT_DIR}")
+    # ── Save and upload checkpoint after each epoch (survives kernel restarts) ──
+    log(f"Saving epoch {_epoch+1} checkpoint...")
+    _model.save_pretrained(str(OUTPUT_DIR))
+    _tokenizer.save_pretrained(str(OUTPUT_DIR))
+    _size_mb = (OUTPUT_DIR / "adapter_model.safetensors").stat().st_size / 1024 / 1024
+    log(f"Checkpoint: {_size_mb:.1f} MB")
 
-# ── Upload to HuggingFace (survives kernel restarts) ──
-import os
-_hf_token = os.environ.get("HF_TOKEN", "")
-if _hf_token:
-    log("Uploading to HuggingFace...")
-    from huggingface_hub import HfApi
-    _api = HfApi()
-    _api.upload_folder(
-        folder_path=str(OUTPUT_DIR),
-        repo_id="Seamus05/safety-lora-8b",
-        repo_type="model",
-        token=_hf_token,
-    )
-    log(f"Uploaded to HuggingFace: prism-ml/safety-lora-8b")
-else:
-    log("No HF_TOKEN set — skipping HuggingFace upload")
+    _hf_token = os.environ.get("HF_TOKEN", "")
+    if _hf_token:
+        log(f"Uploading epoch {_epoch+1} to HuggingFace...")
+        from huggingface_hub import HfApi
+        _api = HfApi()
+        _api.upload_folder(
+            folder_path=str(OUTPUT_DIR),
+            repo_id="Seamus05/safety-lora-8b",
+            repo_type="model",
+            token=_hf_token,
+        )
+        log(f"Uploaded epoch {_epoch+1} to HuggingFace")
+    else:
+        log("No HF_TOKEN — skipping upload")
 
 # ── Signal completion ──
 DONE.write_text(f"completed at {time.strftime('%Y-%m-%d %H:%M:%S')}\nadapter: {_size_mb:.1f} MB")
