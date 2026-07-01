@@ -156,7 +156,7 @@ if _hf_token:
     _api = HfApi()
     _api.upload_folder(
         folder_path=str(OUTPUT_DIR),
-        repo_id="prism-ml/safety-lora-8b",
+        repo_id="Seamus05/safety-lora-8b",
         repo_type="model",
         token=_hf_token,
     )
