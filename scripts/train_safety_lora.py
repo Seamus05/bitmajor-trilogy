@@ -2,7 +2,7 @@
 """Standalone safety LoRA training script. Runs to completion, writes log.
 Launch from a marimo cell with subprocess.Popen — survives WebSocket drops.
 """
-import json, sys, time, subprocess
+import json, os, sys, time, subprocess
 from pathlib import Path
 
 LOG = Path("/marimo/training.log")
